@@ -1,0 +1,211 @@
+---
+title: "Machine Learning Course Project"
+author: "arturocm"
+date: "Friday, May 22, 2015"
+output: html_document
+---
+
+###Executive Summary
+
+The following document will walk you throught the steps followed to explore, clean, analyze and develop a machine learning algorithm based on Human Activity Recongition data - or HAR. According to the literature:*This human activity recognition research has traditionally focused on discriminating between different activities, i.e. to predict "which" activity was performed at a specific point in time*
+
+This work was possible thanks to the data available through the **Qualitative Activity Recognition of Weight Lifting Exercises** document (see references to a complite cite on this work)
+
+###Data Exploration
+
+These are all the libraries being used during this project:
+```{r library_loading, echo=TRUE, warning=FALSE, results='hide'}
+library(caret)
+library(randomForest)
+library(rpart)
+library(gbm)
+library(dplyr)
+```
+In addition, we took advantage of the `doParallel` package to try to speed up the processing times. 
+```{r library_loading2, echo=FALSE, warning=FALSE}
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+```
+
+The raw training data consists on a table with 19,622 observarions and 160 variables. After carefuly looking at the data frame using the `str` function there appear to be some variables with NAs, #DIV/0! and empty fields. In addition, the first 7 columns contain information not relevant for our model - such as the name of the people being studied. 
+
+###Data Cleansing
+
+Once there was a better understaind of the train data, we **reload** the training file using `read.csv` with the argument `na.string = c("NA", "#DIV/0!","")`. By setting all unrecongized data to NA will allow us to use the folowing code lines to clean out our variables:
+
+```{r data_loading_partition, echo=TRUE, warning=FALSE}
+train <- read.csv("pml-training.csv", na.string = c("NA", "#DIV/0!",""))
+test <- read.csv("pml-testing.csv")
+inTrain <- createDataPartition(y=train$classe, p=0.7, list=FALSE) 
+training <- train[inTrain,]
+testing <- train[-inTrain,]
+r <- sapply(training, function(x) sum(is.na(x)))
+training <- training[,r==0] # Remove columns with NAs
+training <- training[,-c(1:7)] # Remove first 7 columns with useless information
+```
+
+This reduces our 160 variables down to 53! At this point we can start looking around to find the best classifation algorithm that will help us predict which Weight Lifting Excersice is being done.
+
+In addition, we use this section of the script to create a **cross-validation** file by splitting the `train` data into `training` and `testing` with `createDataPartition()`
+
+###Model selection
+
+The Machine Learning Lectures covered a wide range of predicting models that we could use through the `caret` package. Initially, the idea was to train a **Random Forest Model**, a **Generalized Boosted Regression Model** and a **Recursive Partitioning and Regression Trees Model**. Doing this through caret proved to be much longer than what I was willing to wait so I decided to use the functions strait from their own libraries.
+
+**Note** Using `randomForest()` took nothign compared to using `train(..., method="rf")`. Same with `gbm()` and `rpart()`
+
+In order to get a model that best predicted the data we try the following Models + Settings:
+
+Name | Model | ntree | mtry | prox | verbose | ncores | Accuracy
+---- | ----- | ----- | ---- | ---- | ------- | ------  | --------
+rf1 | randomForest | 500 | 5 | TRUE | NA | NA | `r rf_1`
+rf2 | randomForest | 500 | 10 | TRUE | NA | NA | `r rf_2` 
+rf3 | randomForest | 500 | 15 | TRUE | NA | NA | `r rf_3`
+rf4 | randomForest | 500 | 5 | TRUE | NA | NA | `r rf_4`
+rf5 | randomForest | 500 | 10 | TRUE | NA | NA | `r rf_5`
+rf6 | randomForest | 500 | 15 | TRUE | NA | NA | `r rf_6`
+gbm | gbm | NA | NA | NA | FALSE | 8 | `r gbm_`
+rpart | rpart | NA | NA | NA | NA | NA | `r rpart_`
+comb | gbm + rpart | NA | NA | NA | NA | NA | `r comb_`
+
+
+```{r model_fitting_part1, echo=FALSE, warning=FALSE, eval=FALSE, include=FALSE}
+mod.rf1 <- randomForest(classe ~ ., 
+                data = training, 
+                prox = TRUE,
+                mtry=5,
+                ntree = 500)
+saveRDS(mod.rf1, "rf1_model.rds")
+
+mod.rf2 <- randomForest(classe ~ ., 
+                data = training, 
+                prox = TRUE,
+                mtry=10,
+                ntree = 500)
+saveRDS(mod.rf2, "rf2_model.rds")
+
+mod.rf3 <- randomForest(classe ~ ., 
+                data = training, 
+                prox = TRUE,
+                mtry=15,
+                ntree = 500)
+saveRDS(mod.rf3, "rf_model.rds")
+
+mod.rf4 <- randomForest(classe ~ ., 
+                data = training, 
+                prox = TRUE,
+                mtry=5,
+                ntree = 1000)
+saveRDS(mod.rf4, "rf4_model.rds")
+
+mod.rf5 <- randomForest(classe ~ ., 
+                data = training, 
+                prox = TRUE,
+                mtry=10,
+                ntree = 1000)
+saveRDS(mod.rf5, "rf5_model.rds")
+
+mod.rf6 <- randomForest(classe ~ ., 
+                data = training, 
+                prox = TRUE,
+                mtry=15,
+                ntree = 1000)
+saveRDS(mod.rf6, "rf_model.rds")
+
+mod.gbm <- gbm(classe ~ ., 
+               data = training,
+               cv.folds = 3,
+               distribution = "multinomial",
+               verbose = FALSE,
+               n.cores = 8)
+saveRDS(mod.gbm, "gbm_model.rds")
+
+mod.rpart <- rpart(classe ~ ., 
+                   data = training, 
+                   method = "class")
+saveRDS(mod.rpart, "rpart_model.rds")
+
+combined <- data.frame(pred.gbm.trans, pred.rpart.trans, classe = testing$classe)
+combfit <- train(classe ~ ., data = combined, method = "rf")
+saveRDS(combfit, "comb_model.rds")
+```
+
+```{r model_fitting_part2, echo=TRUE, warning=FALSE, cache=TRUE, results='hide'}
+mod.rf1 <- readRDS("rf1_model.rds")
+pred.rf1 <- predict(mod.rf1, testing)
+rf1 <- confusionMatrix(pred.rf1,testing$classe)
+
+mod.rf2 <- readRDS("rf2_model.rds")
+pred.rf2 <- predict(mod.rf2, testing)
+rf2 <- confusionMatrix(pred.rf2,testing$classe)
+
+mod.rf3 <- readRDS("rf_model.rds")
+pred.rf3 <- predict(mod.rf3, testing)
+rf3 <- confusionMatrix(pred.rf3,testing$classe)
+
+mod.rf4 <- readRDS("rf4_model.rds")
+pred.rf4 <- predict(mod.rf4, testing)
+rf4 <- confusionMatrix(pred.rf4,testing$classe)
+
+mod.rf5 <- readRDS("rf5_model.rds")
+pred.rf5 <- predict(mod.rf5, testing)
+rf5 <- confusionMatrix(pred.rf5,testing$classe)
+
+mod.rf6 <- readRDS("rf_model.rds")
+pred.rf6 <- predict(mod.rf6, testing)
+rf6 <- confusionMatrix(pred.rf6,testing$classe)
+
+mod.gbm <- readRDS("gbm_model.rds")
+best.iter <- gbm.perf(mod.gbm, method="cv")
+pred.gbm <- predict(mod.gbm, testing)
+pred.gbm.trans <- colnames(pred.gbm)[apply(pred.gbm,1,function(i){which(i==max(i))})]
+gbm <- confusionMatrix(pred.gbm.trans,testing$classe)
+
+mod.rpart <- readRDS("rpart_model.rds")
+pred.rpart <- predict(mod.rpart, testing)
+pred.rpart.trans <- colnames(pred.rpart)[apply(pred.rpart,1,function(i){which(i==max(i))})]
+rpart <- confusionMatrix(pred.rpart.trans,testing$classe)
+
+combined <- data.frame(pred.gbm.trans, pred.rpart.trans, classe = testing$classe)
+combfit <- readRDS("comb_model.rds")
+combpred <- predict(combfit,combined)
+comb <- confusionMatrix(combpred,testing$classe)
+
+rf_1 <- rf1$overall["Accuracy"]
+rf_2 <- rf2$overall["Accuracy"]
+rf_3 <- rf3$overall["Accuracy"]
+rf_4 <- rf4$overall["Accuracy"]
+rf_5 <- rf5$overall["Accuracy"]
+rf_6 <- rf6$overall["Accuracy"]
+gbm_ <- gbm$overall["Accuracy"]
+rpart_ <- rpart$overall["Accuracy"]
+comb_ <- comb$overall["Accuracy"]
+```
+
+```{r misc, echo=FALSE, warning=FALSE, include=FALSE, eval=FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+```
+
+```{r results, echo=TRUE, warning=FALSE, include=FALSE, eval=FALSE}
+answers <- predict(mod.rf2,test)
+pml_write_files(answers)
+```
+
+##Conclussions
+
+Using any **Random Forest** model achieved 20/20 predictions. **Random Forest** proved to be much better predictor than gbm or rpart as seen by the model summary table above the best accuracy was achieved by these models. The combined model used in this project only includes gbm and rpart and it doesn't include any of the rf models. This is intetional as gbm + rpart is better than each of its parts separately, but if rf was included it performed the same as the rf model alone. 
+
+
+
+###References
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#wle_paper_section#ixzz3b5tHD4fw
